@@ -1,0 +1,81 @@
+name: macOS App CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-macos:
+    runs-on: macos-14
+
+    steps:
+    - name: ⬇️ Checkout code
+      uses: actions/checkout@v4
+
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: 📦 Install system dependencies
+      run: |
+        brew update
+        # Added geos for shapely and ccache to speed up builds/fix warnings
+        brew install cmake ninja libomp geos ccache || true
+
+    - name: 📦 Create venv & install dependencies
+      run: |
+        python -m venv venv
+        source venv/bin/activate
+        pip install --upgrade pip setuptools wheel
+        # Install the specific OCR extra and the common "phantom" dependencies
+        pip install "paddlex[ocr]" 
+        pip install "paddlex[ocr-core]"
+        pip install shapely pyclipper lanms-neo
+        pip install pyinstaller
+        pip uninstall opencv-python -y || true
+        pip install opencv-contrib-python
+        pip install "llama-cpp-python==0.3.15" 
+        pip install -r requirements.txt
+
+    - name: 🔧 Fix Paddle Binary Linkage & Inject core.py
+      run: |
+        source venv/bin/activate
+        CORE_PATH="venv/lib/python3.12/site-packages/paddle/base/core.py"
+        echo "🔍 Previewing first 10 lines of $CORE_PATH"
+        head -n 10 "$CORE_PATH" || echo "⚠️ core.py not found"
+        echo "🗑 Deleting $CORE_PATH"
+        rm -f "$CORE_PATH"
+        echo "📦 Copying repo core.py to $CORE_PATH"
+        cp core.py "$CORE_PATH"
+        pip install "llama-cpp-python==0.3.15" 
+    
+    - name: 🛠️ Set Build Environment
+      run: |
+        export DYLD_LIBRARY_PATH=$(python -c "import os, llama_cpp; print(os.path.dirname(llama_cpp.__file__))")
+        echo "DYLD_LIBRARY_PATH=$DYLD_LIBRARY_PATH" >> $GITHUB_ENV
+
+    - name: 🛠 Build keySearch
+      run: |
+        source venv/bin/activate
+        # Ensure your build.py uses --collect-all paddlex or --hidden-import paddlex.inference.models.ocr
+        python build.py
+
+    - name: 🧪 Run executable with test data
+      run: |
+        mkdir -p data/new_pdfs schema
+        # Download a tiny valid 1-page PDF
+        curl -L https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf -o data/new_pdfs/test.pdf
+        # Create a basic JSON schema
+        echo '{  "Housing Depth": {"data_type": "string","values": ["Super Shallow "],"product_types": ["Downlights"]}}' > schema/test_schema.json
+
+        ./dist/keySearch \
+          --input=./data/new_pdfs \
+          --schema=./schema/test_schema.json \
+
+    - name: 📤 Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: keySearch
+        path: dist/keySearch

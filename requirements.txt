@@ -1,0 +1,16 @@
+argparse
+pypdfium2==4.30.0
+doclayout-yolo==0.0.4
+paddlepaddle==3.0.0
+PaddleOCR==3.2.0
+PyMuPDF
+huggingface_hub
+langchain==0.3.27
+pillow
+tqdm
+regex
+PyPDF2
+dill
+hf_xet
+tiktoken
+chardet==5.2.0
