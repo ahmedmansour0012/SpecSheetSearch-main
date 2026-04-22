@@ -1,15 +1,148 @@
 from paddleocr import PaddleOCR
 import re
+import logging
 import numpy as np
+import os
+from pathlib import Path
+from mistralai.client import Mistral
 
-def get_ocr_object_per_page(images,ocr):
-  ocr_results =[]
-  for image in images:
-    np_img = np.asarray(image)
-    res = ocr.predict(np_img)
-    if res:
-      ocr_results.append(res)
-  return ocr_results
+# Phrases that unambiguously mark a page as photometric test data
+_PHOTOMETRIC_MARKERS = [
+    "candlepower",
+    "zonal lumens",
+    "coefficient of utilization",
+    "footcandle plot",
+    "spacing criterion",
+    "angle in degrees",
+    "mounting height aff",
+    "ies file",
+    "bug rating",
+    "candela distribution",
+    "photometric report",
+    "luminaire efficiency",
+    "fc per w",
+    "luminance",
+    "nadir",
+    "photometric data",
+]
+
+# Phrases that anchor a page as a product spec / ordering page
+_SPEC_MARKERS = [
+    "ordering information",
+    "ordering code",
+    "catalog number",
+    "specifications",
+    "features",
+    "options",
+    "accessories",
+    "warranty",
+    "finish",
+]
+
+def classify_page_content(page_ocr_result) -> str:
+    """
+    Classify a single page OCR result as 'spec', 'photometric', or 'mixed'.
+
+    Returns 'photometric' only when strong photometric evidence exists and no
+    spec markers are present, so we never accidentally discard ordering pages.
+    """
+    if not page_ocr_result or "rec_texts" not in page_ocr_result[0]:
+        return "spec"
+
+    page_text = " ".join(page_ocr_result[0]["rec_texts"]).lower()
+
+    photo_hits = sum(1 for m in _PHOTOMETRIC_MARKERS if m in page_text)
+    spec_hits  = sum(1 for m in _SPEC_MARKERS if m in page_text)
+
+    if photo_hits >= 2 and spec_hits == 0:
+        return "photometric"
+    if photo_hits >= 1 and spec_hits == 0:
+        return "mixed"
+    return "spec"
+
+
+def filter_spec_pages(images, ocr_results):
+    """
+    Drop pages classified as purely photometric.
+    Always keeps at least the first page and never returns an empty list.
+    """
+    pairs = list(zip(images, ocr_results))
+    kept = [(img, res) for img, res in pairs if classify_page_content(res) != "photometric"]
+
+    if not kept:
+        logging.warning("classify_page_content dropped ALL pages — keeping first page as fallback.")
+        kept = [pairs[0]]
+
+    dropped = len(pairs) - len(kept)
+    if dropped:
+        logging.info(f"  → Page classifier dropped {dropped} photometric page(s) from pipeline.")
+
+    filtered_images, filtered_ocr = zip(*kept)
+    return list(filtered_images), list(filtered_ocr)
+
+
+def get_ocr_object_per_page_paddle(images, ocr_engine):
+    ocr_results = []
+    for image in images:
+        np_img = np.asarray(image)
+        res = ocr_engine.predict(np_img)
+        if res:
+            ocr_results.append(res)
+    return ocr_results
+
+
+def get_ocr_object_per_page_mistral(pdf_path, images, api_key=None):
+    """
+    Mistral OCR backend. Uploads the PDF once, returns the same structure as
+    get_ocr_object_per_page_paddle:
+      [ [{"rec_texts": [...], "rec_polys": [...], "rec_scores": [...]}], ... ]
+
+    images provides per-page pixel dimensions for synthetic rec_polys so that
+    downstream spatial functions stay in the same coordinate space as YOLO.
+    """
+    if api_key is None:
+        api_key = os.environ.get("MISTRAL_API_KEY")
+
+    client = Mistral(api_key=api_key)
+
+    pdf_bytes = Path(pdf_path).read_bytes()
+    uploaded = client.files.upload(
+        file={"file_name": Path(pdf_path).name, "content": pdf_bytes},
+        purpose="ocr",
+    )
+    signed_url = client.files.get_signed_url(file_id=uploaded.id, expiry=1)
+    response = client.ocr.process(
+        model="mistral-ocr-latest",
+        document={"type": "document_url", "document_url": signed_url.url},
+    )
+    response_dict = response.model_dump()
+    pages = response_dict.get("pages", [])
+
+    ocr_results = []
+    for page_idx, page in enumerate(pages):
+        w, h = images[page_idx].size if page_idx < len(images) else (1000, 1000)
+
+        markdown = page.get("markdown", "")
+        lines = [ln.strip() for ln in markdown.split("\n") if ln.strip()]
+
+        n = len(lines)
+        if n:
+            rec_polys = [
+                [[0, int(li * h / n)], [w, int(li * h / n)],
+                 [w, int((li + 1) * h / n)], [0, int((li + 1) * h / n)]]
+                for li in range(n)
+            ]
+            rec_scores = [1.0] * n
+        else:
+            rec_polys, rec_scores = [], []
+
+        ocr_results.append([{
+            "rec_texts": lines,
+            "rec_polys": rec_polys,
+            "rec_scores": rec_scores,
+        }])
+
+    return ocr_results
 
 def build_full_ocr_text(ocr_results):
     # Collect all text snippets into a list first
@@ -90,9 +223,9 @@ def filter_ocr_keys_by_regions(ocr_key_hits, regions_by_page):
         for region in regions_by_page[page_idx]:
             region_box = (region['x1'], region['y1'], region['x2'], region['y2'])
             if boxes_intersect(key_box, region_box):
-                # add stop_y to the hit
                 hit_copy = hit.copy()
                 hit_copy['stop_y'] = region['y2']
+                hit_copy['table_y1'] = region['y1']
                 filtered.append(hit_copy)
                 break  # one match is enough
 
@@ -163,6 +296,7 @@ def match_values_for_keys(
             new_values[val] = is_hit
             if is_hit:
                 any_value_hit = True
+                print(f"[TABLE_HIT] {attr_name} -> '{val}': True")
 
         # 2️⃣ Process Extra Values (only add if matched)
         for extra_val in possible_extras:
@@ -170,6 +304,7 @@ def match_values_for_keys(
             if extra_norm and extra_norm in combined_norm:
                 new_values[extra_val] = True
                 any_value_hit = True
+                print(f"[TABLE_EXTRA_HIT] {attr_name} -> '{extra_val}': True")
                 # no False entries for extras
 
         # 3️⃣ Add to final dicts

@@ -180,14 +180,32 @@ def extract_candidate_rows_for_keys(filtered_keys, ocr_results):
 
     for item in filtered_keys:
         index = item["ocr_result_index"]
-        pages.add(index)
+        key_poly = item["bbox"]
+        table_y1 = item.get("table_y1")
+        table_y2 = item.get("stop_y")
 
+        # Header position check: key must sit in the top 25% of the table.
+        # If table bounds are known and the key is deeper in the body, it is
+        # a data cell (e.g. photometric row label) not a column header — skip it.
+        if table_y1 is not None and table_y2 is not None:
+            table_height = table_y2 - table_y1
+            if table_height > 0:
+                key_y1 = min(p[1] for p in key_poly)
+                header_ratio = (key_y1 - table_y1) / table_height
+                if header_ratio > 0.25:
+                    logging.debug(
+                        f"Skipping key '{item['key']}' — not a table header "
+                        f"(position {header_ratio:.0%} from table top)."
+                    )
+                    continue
+
+        pages.add(index)
         page_ocr = ocr_results[index][0]
         results = get_text_under_key_to_page_end(
-            key_poly=item["bbox"],
+            key_poly=key_poly,
             rec_texts=page_ocr["rec_texts"],
             rec_polys=page_ocr["rec_polys"],
-            stop_y=item["stop_y"]
+            stop_y=table_y2
         )
         row_for_key_data.append({
             'key': item['key'],

@@ -3,13 +3,13 @@ import logging
 import json
 from  model_loader import get_qwen_model_path, get_yolo_model_path
 from  input_handler import convert_pdf_with_pymupdf
-from  ocr import get_ocr_object_per_page
+from ocr import get_ocr_object_per_page_paddle, get_ocr_object_per_page_mistral
 from  generate_mouting import (
     build_mounting_prompt,
     get_valid_json,
     load_schema_and_derive_product_types,)
-from  input_handler import save_final_result, merge_match_results
-from  ocr import build_full_ocr_text, filter_ocr_key_hit_by_value_matched, filter_ocr_keys_by_regions, match_values_for_keys
+from  input_handler import save_final_result, merge_match_results, save_ocr_debug
+from  ocr import build_full_ocr_text, filter_ocr_key_hit_by_value_matched, filter_ocr_keys_by_regions, match_values_for_keys, filter_spec_pages
 from  serching import (
     match_product_types_via_lookup,
     split_schema_by_product_type_match, 
@@ -24,7 +24,7 @@ from  generate_mouting import generate_llm_response
 from ocr import build_full_ocr_text
 from extract_txt_form_expected import format_row_data_to_markdown, get_value_prompt, build_ocr_context
 
-def process_lighting_spec_sheet(pdf_path, schema_path, ocr_engine, output_dir="final_result", use_gpu=False):
+def process_lighting_spec_sheet(pdf_path, schema_path, output_dir="final_result", use_gpu=False, ocr_backend="paddle", ocr_engine=None):
     base_name = os.path.splitext(os.path.basename(pdf_path))[0]
     logging.info(f"📄 Processing spec sheet: {base_name}.pdf")
 
@@ -32,9 +32,18 @@ def process_lighting_spec_sheet(pdf_path, schema_path, ocr_engine, output_dir="f
     logging.info("  → Converting PDF to images...")
     images = convert_pdf_with_pymupdf(pdf_path)
     images = images[:3]   # Limit to first 3 pages for efficiency; adjust as needed
+
     # Step 2: OCR
-    logging.info("  → Running OCR on all pages...")
-    ocr_results = get_ocr_object_per_page(images, ocr_engine)
+    logging.info(f"  → Running OCR on all pages (backend: {ocr_backend})...")
+    if ocr_backend == "mistral":
+        ocr_results = get_ocr_object_per_page_mistral(pdf_path, images)
+        ocr_results = ocr_results[:len(images)]  # align page count
+    else:
+        ocr_results = get_ocr_object_per_page_paddle(images, ocr_engine)
+
+    # Step 2.5: Drop photometric-only pages (contamination guard)
+    logging.info("  → Classifying pages and filtering photometric data pages...")
+    images, ocr_results = filter_spec_pages(images, ocr_results)
 
     # Step 3: Load schema & derive product types
     logging.info("  → Loading attribute schema and deriving product types...")
@@ -105,6 +114,7 @@ def process_lighting_spec_sheet(pdf_path, schema_path, ocr_engine, output_dir="f
     # Step 5: Build full OCR text
     logging.info("  → Building full OCR text...")
     big_text = build_full_ocr_text(ocr_results)
+    save_ocr_debug(ocr_results, big_text, output_dir, base_name)
 
     # Step 6: Match product types
     logging.info("  → Matching product types from OCR text...")

@@ -6,6 +6,44 @@ from PIL import Image
 import json
 import logging
 
+def save_ocr_debug(ocr_results, big_text, output_dir, base_name):
+    """
+    Save raw OCR results (per page) and combined text to debug files.
+    Polys are serialized as nested lists so the output is JSON-safe.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    # --- Raw per-page OCR ---
+    pages_out = []
+    for page_idx, result_group in enumerate(ocr_results):
+        if not result_group or "rec_texts" not in result_group[0]:
+            pages_out.append({"page": page_idx, "rec_texts": [], "rec_scores": [], "rec_polys": []})
+            continue
+        page = result_group[0]
+        polys = page.get("rec_polys", [])
+        serialized_polys = [
+            [[float(coord) for coord in point] for point in poly]
+            for poly in polys
+        ]
+        pages_out.append({
+            "page": page_idx,
+            "rec_texts": page.get("rec_texts", []),
+            "rec_scores": [float(s) for s in page.get("rec_scores", [])],
+            "rec_polys": serialized_polys,
+        })
+
+    raw_path = os.path.join(output_dir, f"ocr_raw_{base_name}.json")
+    with open(raw_path, "w", encoding="utf-8") as f:
+        json.dump(pages_out, f, indent=2, ensure_ascii=False)
+    logging.info(f"  → OCR raw saved to: {raw_path}")
+
+    # --- Combined text ---
+    combined_path = os.path.join(output_dir, f"ocr_combined_{base_name}.txt")
+    with open(combined_path, "w", encoding="utf-8") as f:
+        f.write(big_text)
+    logging.info(f"  → OCR combined text saved to: {combined_path}")
+
+
 def convert_pdf_with_pymupdf(pdf_path):
     doc = fitz.open(pdf_path)
     images = []

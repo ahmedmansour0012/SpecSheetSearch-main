@@ -1,70 +1,45 @@
 def get_value_prompt(key, expected_output, ocr_context):
     return f"""
-You are a strict product-attribute value extractor.
+You are a product-attribute value extractor. Your only job is to find values for a single attribute from OCR text.
 
-Your task:
-- Extract ONLY concrete values from OCR-extracted text that are VALID according to the attribute rules defined below, and that could legitimately be assigned as the value for the product attribute "{key}".
+ATTRIBUTE: {key}
 
-ABSOLUTE RULES (DO NOT VIOLATE):
-1. Output MUST be a valid Python list literal.
-2. Output MUST contain ONLY the list — no explanations, comments, labels, or extra text.
-3. Do NOT output JSON, dictionaries, keys, attribute names, or booleans unless they are the value itself.
-4. Each list element MUST be a single value that could directly be assigned to the key "{key}".
-5. Values may appear in:
-   - table cells
-   - column values
-   - label–value pairs
-   - short descriptive text
-6. If a value appears in a table, return ONLY the cell value itself — NOT headers, row labels, footnotes, or surrounding text.
-7. EXCLUDE any value that is:
-   - an instruction, note, or reference (e.g. “See page 2”, “Refer to brochure”)
-   - a SKU, part number, model number, or internal code
-   - a placeholder or capability (e.g. “Custom”, “Various”, “Available upon request”)
-   - marketing or descriptive text that does NOT represent an actual value
-8. Do NOT hallucinate, infer missing values, or combine multiple fields.
-9. Preserve original wording and formatting as found in the OCR text, except for trimming whitespace.
-10. If no valid value exists, return an empty Python list: [].
-11. You MUST stop extracting once all DISTINCT valid values present in the OCR text
-    have been identified.
-12. Do NOT continue generating values beyond what is explicitly present in the OCR text.
-13. The output list MUST be the minimal complete set of valid values.
-    Adding extra values is a violation.
-
-ATTRIBUTE VALUE RULES (AUTHORITATIVE):
-The following describes what constitutes a VALID value for this attribute.
-These rules may allow:
-- exact matches to predefined option values
-- equivalent variants (spacing, case, minor formatting differences)
-- numeric values with specific formatting requirements
-- boolean values (true / false) when explicitly stated
-- measurements with allowed units or ranges
-
-Apply ONLY the rules that are relevant to the extracted value.
-Do NOT return values that violate these rules.
-
+--- EXTRACTION RULE (READ THIS FIRST - IT CONTROLS EVERYTHING) ---
 {expected_output}
+---
 
-Attribute key (REFERENCE ONLY — DO NOT OUTPUT):
-{key}
+This rule tells you:
+- What values are valid (exact list match, similar variants, or free-form numeric)
+- What format returned values must follow (units, casing, numeric style)
+- How strictly to filter what you extract
 
-OCR text (unstructured, may contain noise):
+Apply this rule literally.
+If it says 'must exactly match', only return values that directly correspond to known options for this attribute.
+If it says 'return all values' or gives a numeric format, extract every occurrence that fits that format.
+If it says 'may return similar', use the rule as a guide but allow reasonable variants found in the text.
+
+--- UNIVERSAL EXCLUSIONS (always apply regardless of rule above) ---
+- Notes, references, instructions (e.g. 'See page 2', 'Refer to brochure')
+- SKUs, part numbers, model codes
+- Placeholders ('Custom', 'Various', 'Available upon request')
+- Marketing text that is not a concrete assignable value
+- Table headers, row labels, footnotes
+- Values longer than 3 words unless the extraction rule explicitly allows it
+
+--- OUTPUT FORMAT ---
+- Output a valid Python list literal and NOTHING ELSE
+- Use double quotes for string values
+- If nothing valid found: []
+- Do NOT hallucinate or infer - only extract what is explicitly present in the OCR text
+
+OCR TEXT:
 <<<OCR_START>>>
 {ocr_context}
 <<<OCR_END>>>
 
-MANDATORY SELF-CHECK (BEFORE OUTPUT):
-For each candidate value, confirm ALL of the following:
-1. Is this a real, concrete value (not a note, reference, or code)?
-2. Does it satisfy at least one of the allowed formats or conditions described above?
-3. Could this value alone be stored as the value for "{key}" in a database or shown as a selectable option?
+SELF-CHECK BEFORE OUTPUT: For each candidate value, ask - does it satisfy the EXTRACTION RULE above?
+If no, exclude it.
 
-If ANY answer is NO, the value MUST be excluded.
-NEVER INCLUDE DESCRIPTIONS VALUE CAN'T BE LONGER THAN 3 WORDS
-OUTPUT FORMAT REQUIREMENTS:
-- Output must be parseable by Python ast.literal_eval
-- Use double quotes for string values
-
-REMEMBER:
 OUTPUT A PYTHON LIST AND NOTHING ELSE.
 """
 
@@ -73,16 +48,12 @@ def build_ocr_context(ocr_key_hit, key):
     Builds a single string of context for a specific key.
     Filters through hit_objects and joins their context snippets.
     """
-    # 1. Use a list comprehension to find all contexts where the key matches
-    # We use .lower() on both to ensure the match isn't broken by capitalization
     context_snippets = [
         hit_object['context']
         for hit_object in ocr_key_hit
         if hit_object.get('key', '').lower() == key.lower()
     ]
 
-    # 2. Join the snippets with a single space
-    # .strip() removes any leading/trailing whitespace from the final result
     return " ".join(context_snippets).strip()
 
 def format_row_data_to_markdown(text_list, key):
@@ -96,22 +67,19 @@ def format_row_data_to_markdown(text_list, key):
     if not text_list:
         return f"**Column {key}:**\n> No data to display.\n"
 
-    # Start the "Column:" section with the user-provided key
     header = str(key).upper()
     block = [f"**Column:**", f"| {header} |"]
 
     for item in text_list:
-        # Handle if item is a dictionary or just a raw string
         if isinstance(item, dict):
             text = item.get('text', '').strip()
         else:
             text = str(item).strip()
 
         if text:
-            # Add as a new row in the table
             block.append(f"{text} ")
 
-    if len(block) == 3: # Only header and separator exist
+    if len(block) == 3:
         block.append("")
 
     return "\n".join(block)

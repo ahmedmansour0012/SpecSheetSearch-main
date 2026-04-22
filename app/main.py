@@ -74,7 +74,7 @@ if hasattr(sys, '_MEIPASS'):
 # IMPORTS (After logging setup and llama patch)
 # ============================================================================
 from process_lighting_spec_sheet import process_lighting_spec_sheet
-from model_loader import get_ocr_instance, get_llm_instance, check_gpu_support
+from model_loader import get_llm_instance, get_ocr_instance, check_gpu_support
 
 # Suppress mypyc import errors in bundled builds
 sys.modules['0deeb2fec52624e647be__mypyc'] = None
@@ -99,7 +99,9 @@ Examples:
                        help="Path to schema JSON file")
     parser.add_argument("--verbose", "-v", action="store_true",
                        help="Enable verbose logging (shows llama.cpp internal logs)")
-    
+    parser.add_argument("--ocr", choices=["paddle", "mistral"], default="paddle",
+                       help="OCR backend to use (default: paddle)")
+
     args = parser.parse_args()
 
     # Re-configure logging if --verbose was passed via argparse
@@ -145,14 +147,17 @@ Examples:
                 "💡 Reinstall with: pip install llama-cpp-python --no-cache-dir -C cmake.args='-DGGML_CUDA=on'"
             )
     
-    # Warm up models (OCR + LLM) before processing loop
+    # Warm up models before processing loop
+    ocr_engine = None
     try:
-        logger.info("🔄 Warming up OCR engine...")
-        ocr_engine = get_ocr_instance()
-        logger.info("✓ OCR engine ready")
-        
+        if args.ocr == "paddle":
+            logger.info("🔄 Warming up OCR engine (PaddleOCR)...")
+            ocr_engine = get_ocr_instance()
+            logger.info("✓ OCR engine ready")
+        else:
+            logger.info("🌐 OCR backend: Mistral (stateless API, no warmup needed)")
+
         if args.gpu or _VERBOSE_FLAG:
-            # Only initialize LLM if GPU mode or verbose (to see loading logs)
             logger.info("🔄 Warming up LLM (this may take 30-60s on first run)...")
             llm = get_llm_instance(use_gpu=args.gpu)
             logger.info("✓ LLM ready")
@@ -186,9 +191,10 @@ Examples:
             is_hit = process_lighting_spec_sheet(
                 pdf_path,
                 schema_path,
-                ocr_engine,
                 output_dir=output_dir,
-                use_gpu=args.gpu
+                use_gpu=args.gpu,
+                ocr_backend=args.ocr,
+                ocr_engine=ocr_engine,
             )
 
             filename = os.path.basename(pdf_path)
