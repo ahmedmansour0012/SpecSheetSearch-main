@@ -5,7 +5,7 @@ import pathlib
 from ctypes import CFUNCTYPE, c_int, c_char_p, c_void_p
 from huggingface_hub import hf_hub_download
 from llama_cpp import Llama
-from paddleocr import PaddleOCR
+from paddleocr import PaddleOCR, TableStructureRecognition
 from config import (
     LLM_FILENAME, LLM_REPO_ID,
     LLM_FILENAME_GPU, LLM_REPO_ID_GPU  # Import GPU versions
@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 # Global variable to hold the OCR instance
 _ocr_instance = None
+_table_structure_instance = None
 llm = None
 
 # ============================================================================
@@ -268,3 +269,27 @@ def get_ocr_instance():
     else:
         logger.debug("✓ Returning cached OCR instance")
     return _ocr_instance
+
+
+def get_table_structure_instance():
+    """
+    Returns a cached SLANet_plus table-structure recognizer.
+
+    SLANet_plus returns both the HTML structure (with rowspan/colspan) and
+    per-cell bounding boxes, which we intersect with the existing PaddleOCR
+    rec_polys to populate cells with text. SLANeXt is higher-accuracy on
+    structure but returns invalid cell bboxes in PaddleOCR 3.x, so it does
+    not fit our cell-filling strategy.
+    """
+    global _table_structure_instance
+    if _table_structure_instance is None:
+        logger.info("🔄 Initializing PaddleOCR TableStructureRecognition (SLANet_plus)...")
+        try:
+            _table_structure_instance = TableStructureRecognition(model_name="SLANet_plus")
+            logger.info("✓ Table structure recognizer initialized successfully")
+        except Exception as e:
+            logger.error(f"✗ Failed to initialize TableStructureRecognition: {e}", exc_info=True)
+            raise
+    else:
+        logger.debug("✓ Returning cached table structure instance")
+    return _table_structure_instance

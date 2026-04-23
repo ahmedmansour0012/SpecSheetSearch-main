@@ -20,6 +20,11 @@ from  serching import (
 from  table_handler import (
     detect_table_regions_for_key_hits,
     extract_candidate_rows_for_keys,)
+from structured_table import (
+    extract_structured_tables,
+    save_structured_tables_debug,
+    match_keys_against_structured_tables,
+)
 from  generate_mouting import generate_llm_response
 from ocr import build_full_ocr_text
 from extract_txt_form_expected import format_row_data_to_markdown, get_value_prompt, build_ocr_context
@@ -145,6 +150,15 @@ def process_lighting_spec_sheet(pdf_path, schema_path, output_dir="final_result"
     filtered_keys = filter_ocr_keys_by_regions(ocr_key_hit, regions_by_page)
     pages, row_for_key_data = extract_candidate_rows_for_keys(filtered_keys, ocr_results)
 
+    # Step 9.6: Structured table extraction (SLANet_plus on YOLO regions)
+    logging.info("  → Extracting structured tables (SLANet_plus)...")
+    structured_tables = extract_structured_tables(images, regions_by_page, ocr_results)
+    save_structured_tables_debug(
+        structured_tables,
+        os.path.dirname(os.path.abspath(pdf_path)),
+        base_name,
+    )
+
     extra_values_dict = {}
 
     N_CTX = 12288
@@ -224,13 +238,23 @@ def process_lighting_spec_sheet(pdf_path, schema_path, output_dir="final_result"
         extra_values_dict
     )
 
+    # Step 12.5: Structured-table key-value extraction (SLANet_plus cells)
+    logging.info("  → Matching keys against structured table cells...")
+    structured_value_matched, structured_value_not_matched = match_keys_against_structured_tables(
+        structured_tables,
+        value_matched,
+        value_not_matched,
+        extra_values_dict,
+    )
+
     # Step 13: Merge multi-strategy results
     logging.info("  → Merging results from all search strategies...")
     logging.info(table_value_matched)
 
     final_matched, final_not_matched = merge_match_results(
         (final_value_matched, final_value_not_matched),
-        (table_value_matched, table_value_not_matched)
+        (table_value_matched, table_value_not_matched),
+        (structured_value_matched, structured_value_not_matched),
     )
 
     final_result = final_matched | final_not_matched
