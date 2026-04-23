@@ -40,6 +40,14 @@ def process_lighting_spec_sheet(pdf_path, schema_path, output_dir="final_result"
     #     ocr_results = get_ocr_object_per_page_mistral(pdf_path, images)
     #     ocr_results = ocr_results[:len(images)]  # align page count
 
+    # Persist raw PaddleOCR response next to the input PDF
+    save_ocr_debug(
+        ocr_results,
+        build_full_ocr_text(ocr_results),
+        os.path.dirname(os.path.abspath(pdf_path)),
+        base_name,
+    )
+
     # Step 2.5: Drop photometric-only pages (contamination guard)
     logging.info("  → Classifying pages and filtering photometric data pages...")
     images, ocr_results = filter_spec_pages(images, ocr_results)
