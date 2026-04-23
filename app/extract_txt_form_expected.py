@@ -13,8 +13,14 @@ This rule tells you:
 - What format returned values must follow (units, casing, numeric style)
 - How strictly to filter what you extract
 
-Apply this rule literally.
-If it says 'must exactly match', only return values that directly correspond to known options for this attribute.
+IMPORTANT - READ BEFORE DOING ANYTHING ELSE:
+If this rule contains the phrase 'must exactly match' (with or without 'one of the predefined'),
+return [] immediately. Do not read the OCR text. Do not extract anything.
+Those attributes are matched by the system directly against a predefined list - your extraction is not needed.
+
+Only proceed with extraction if the rule says 'return all values', 'may return similar', or gives a numeric/measurement format.
+
+If you do proceed:
 If it says 'return all values' or gives a numeric format, extract every occurrence that fits that format.
 If it says 'may return similar', use the rule as a guide but allow reasonable variants found in the text.
 

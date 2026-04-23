@@ -2,9 +2,9 @@ from paddleocr import PaddleOCR
 import re
 import logging
 import numpy as np
-import os
-from pathlib import Path
-from mistralai.client import Mistral
+# import os
+# from pathlib import Path
+# from mistralai.client import Mistral
 
 # Phrases that unambiguously mark a page as photometric test data
 _PHOTOMETRIC_MARKERS = [
@@ -91,58 +91,58 @@ def get_ocr_object_per_page_paddle(images, ocr_engine):
     return ocr_results
 
 
-def get_ocr_object_per_page_mistral(pdf_path, images, api_key=None):
-    """
-    Mistral OCR backend. Uploads the PDF once, returns the same structure as
-    get_ocr_object_per_page_paddle:
-      [ [{"rec_texts": [...], "rec_polys": [...], "rec_scores": [...]}], ... ]
-
-    images provides per-page pixel dimensions for synthetic rec_polys so that
-    downstream spatial functions stay in the same coordinate space as YOLO.
-    """
-    if api_key is None:
-        api_key = os.environ.get("MISTRAL_API_KEY")
-
-    client = Mistral(api_key=api_key)
-
-    pdf_bytes = Path(pdf_path).read_bytes()
-    uploaded = client.files.upload(
-        file={"file_name": Path(pdf_path).name, "content": pdf_bytes},
-        purpose="ocr",
-    )
-    signed_url = client.files.get_signed_url(file_id=uploaded.id, expiry=1)
-    response = client.ocr.process(
-        model="mistral-ocr-latest",
-        document={"type": "document_url", "document_url": signed_url.url},
-    )
-    response_dict = response.model_dump()
-    pages = response_dict.get("pages", [])
-
-    ocr_results = []
-    for page_idx, page in enumerate(pages):
-        w, h = images[page_idx].size if page_idx < len(images) else (1000, 1000)
-
-        markdown = page.get("markdown", "")
-        lines = [ln.strip() for ln in markdown.split("\n") if ln.strip()]
-
-        n = len(lines)
-        if n:
-            rec_polys = [
-                [[0, int(li * h / n)], [w, int(li * h / n)],
-                 [w, int((li + 1) * h / n)], [0, int((li + 1) * h / n)]]
-                for li in range(n)
-            ]
-            rec_scores = [1.0] * n
-        else:
-            rec_polys, rec_scores = [], []
-
-        ocr_results.append([{
-            "rec_texts": lines,
-            "rec_polys": rec_polys,
-            "rec_scores": rec_scores,
-        }])
-
-    return ocr_results
+# def get_ocr_object_per_page_mistral(pdf_path, images, api_key=None):
+#     """
+#     Mistral OCR backend. Uploads the PDF once, returns the same structure as
+#     get_ocr_object_per_page_paddle:
+#       [ [{"rec_texts": [...], "rec_polys": [...], "rec_scores": [...]}], ... ]
+#
+#     images provides per-page pixel dimensions for synthetic rec_polys so that
+#     downstream spatial functions stay in the same coordinate space as YOLO.
+#     """
+#     if api_key is None:
+#         api_key = os.environ.get("MISTRAL_API_KEY")
+#
+#     client = Mistral(api_key=api_key)
+#
+#     pdf_bytes = Path(pdf_path).read_bytes()
+#     uploaded = client.files.upload(
+#         file={"file_name": Path(pdf_path).name, "content": pdf_bytes},
+#         purpose="ocr",
+#     )
+#     signed_url = client.files.get_signed_url(file_id=uploaded.id, expiry=1)
+#     response = client.ocr.process(
+#         model="mistral-ocr-latest",
+#         document={"type": "document_url", "document_url": signed_url.url},
+#     )
+#     response_dict = response.model_dump()
+#     pages = response_dict.get("pages", [])
+#
+#     ocr_results = []
+#     for page_idx, page in enumerate(pages):
+#         w, h = images[page_idx].size if page_idx < len(images) else (1000, 1000)
+#
+#         markdown = page.get("markdown", "")
+#         lines = [ln.strip() for ln in markdown.split("\n") if ln.strip()]
+#
+#         n = len(lines)
+#         if n:
+#             rec_polys = [
+#                 [[0, int(li * h / n)], [w, int(li * h / n)],
+#                  [w, int((li + 1) * h / n)], [0, int((li + 1) * h / n)]]
+#                 for li in range(n)
+#             ]
+#             rec_scores = [1.0] * n
+#         else:
+#             rec_polys, rec_scores = [], []
+#
+#         ocr_results.append([{
+#             "rec_texts": lines,
+#             "rec_polys": rec_polys,
+#             "rec_scores": rec_scores,
+#         }])
+#
+#     return ocr_results
 
 def build_full_ocr_text(ocr_results):
     # Collect all text snippets into a list first
@@ -296,7 +296,7 @@ def match_values_for_keys(
             new_values[val] = is_hit
             if is_hit:
                 any_value_hit = True
-                print(f"[TABLE_HIT] {attr_name} -> '{val}': True")
+                # print(f"[TABLE_HIT] {attr_name} -> '{val}': True")
 
         # 2️⃣ Process Extra Values (only add if matched)
         for extra_val in possible_extras:

@@ -255,9 +255,11 @@ def get_ocr_instance():
                 text_detection_model_name="PP-OCRv5_mobile_det",
                 text_recognition_model_name="PP-OCRv5_mobile_rec",
                 use_doc_orientation_classify=False,
-                use_doc_unwarping=False,
-                use_textline_orientation=False,
-                text_recognition_batch_size=16,
+              use_doc_unwarping=False,
+              use_textline_orientation=False,
+              text_recognition_batch_size=16,
+              text_det_limit_type="min",       # ← add this
+              text_det_limit_side_len=736,     # ← and this (tune: 640 faster, 960 more accurate)
             )
             logger.info("✓ PaddleOCR initialized successfully")
         except Exception as e:
